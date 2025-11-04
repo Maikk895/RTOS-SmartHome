@@ -59,7 +59,7 @@ UART_HandleTypeDef huart2;
 osThreadId_t Temp_ReadHandle;
 const osThreadAttr_t Temp_Read_attributes = {
   .name = "Temp_Read",
-  .stack_size = 128 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for Encoder */
@@ -67,14 +67,26 @@ osThreadId_t EncoderHandle;
 const osThreadAttr_t Encoder_attributes = {
   .name = "Encoder",
   .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityNormal2,
 };
 /* Definitions for OLED_Disp */
 osThreadId_t OLED_DispHandle;
 const osThreadAttr_t OLED_Disp_attributes = {
   .name = "OLED_Disp",
-  .stack_size = 128 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal1,
+};
+/* Definitions for Heating */
+osThreadId_t HeatingHandle;
+const osThreadAttr_t Heating_attributes = {
+  .name = "Heating",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal4,
+};
+/* Definitions for Encoder_tim01 */
+osTimerId_t Encoder_tim01Handle;
+const osTimerAttr_t Encoder_tim01_attributes = {
+  .name = "Encoder_tim01"
 };
 /* Definitions for I2C_Mutex */
 osMutexId_t I2C_MutexHandle;
@@ -92,9 +104,11 @@ const osSemaphoreAttr_t Temperatura01_attributes = {
   .name = "Temperatura01"
 };
 /* USER CODE BEGIN PV */
-float temperature;
-float humidity;
-float pressure;
+volatile float temperature;
+volatile float humidity;
+volatile float pressure;
+uint16_t time_wait_1, time_wait_2, wait;
+uint8_t set_temp;
 
 struct bme280_dev dev;
 struct bme280_data comp_data;
@@ -114,6 +128,8 @@ static void MX_I2C1_Init(void);
 void StartTemp(void *argument);
 void StartEncoder(void *argument);
 void StartOLED(void *argument);
+void StartHeating01(void *argument);
+void EncoderCallback01(void *argument);
 
 /* USER CODE BEGIN PFP */
 int8_t user_i2c_read(uint8_t id, uint8_t reg_addr, uint8_t *data, uint16_t len);
@@ -210,9 +226,9 @@ int main(void)
 
     //OLED init
     ssd1306_Init();
-    ssd1306_SetCursor(1,0);
-    ssd1306_WriteString("Humidity", Font_7x10, White);
-    ssd1306_UpdateScreen();
+    //ssd1306_SetCursor(1,0);
+    //ssd1306_WriteString("Witaj", Font_7x10, White);
+    //ssd1306_UpdateScreen();
 
   /* USER CODE END 2 */
 
@@ -237,6 +253,10 @@ int main(void)
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
 
+  /* Create the timer(s) */
+  /* creation of Encoder_tim01 */
+  Encoder_tim01Handle = osTimerNew(EncoderCallback01, osTimerPeriodic, NULL, &Encoder_tim01_attributes);
+
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
   /* USER CODE END RTOS_TIMERS */
@@ -254,6 +274,9 @@ int main(void)
 
   /* creation of OLED_Disp */
   OLED_DispHandle = osThreadNew(StartOLED, NULL, &OLED_Disp_attributes);
+
+  /* creation of Heating */
+  HeatingHandle = osThreadNew(StartHeating01, NULL, &Heating_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -436,6 +459,12 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 
+  /*Configure GPIO pins : ENCODER1_Pin ENCODER2_Pin */
+  GPIO_InitStruct.Pin = ENCODER1_Pin|ENCODER2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
   /*Configure GPIO pin : LD3_Pin */
   GPIO_InitStruct.Pin = LD3_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -465,36 +494,29 @@ void StartTemp(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3);
-	  rslt = bme280_set_sensor_mode(BME280_FORCED_MODE, &dev);
-	  	  osDelay(40);
-	      //dev.delay_ms(40);
+	  if(osMutexAcquire(I2C_MutexHandle, 10) == osOK && osSemaphoreAcquire(Temperatura01Handle, 10)  == osOK){
+		  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3);
+		  rslt = bme280_set_sensor_mode(BME280_FORCED_MODE, &dev);
+			  osDelay(40);
+			  //dev.delay_ms(40);
 
-	      rslt = bme280_get_sensor_data(BME280_ALL, &comp_data, &dev);
-	      if (rslt == BME280_OK)
-	      {
-	        temperature = comp_data.temperature / 100.0f;
-	        humidity = comp_data.humidity / 1024.0f;
-	        pressure = comp_data.pressure / 10000.0f;
-	        /*
-	        sprintf(uart_buf,
-	                "Temperatura: %.2f C\r\nWilgotnosc: %.2f %%\r\nCisnienie: %.2f hPa\r\n\r\n",
-	                temperature, humidity, pressure);
-	        */
-	        sprintf(uart_buf, "Humidity: %.2f", humidity);
-	        ssd1306_SetCursor(1,0);
-	        ssd1306_WriteString(uart_buf, Font_7x10, White);
-	        ssd1306_UpdateScreen();
-	        //HAL_UART_Transmit_IT(&huart2, (uint8_t*)uart_buf, strlen(uart_buf));
-	      }
-	      else
-	      {
-	        sprintf(uart_buf, "BME280 read error (%d)\r\n", rslt);
-	        HAL_UART_Transmit(&huart2, (uint8_t*)uart_buf, strlen(uart_buf), HAL_MAX_DELAY);
-	      }
-	      HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3);
-	      osDelay(1000);
-	      //HAL_Delay(1000);
+			  rslt = bme280_get_sensor_data(BME280_ALL, &comp_data, &dev);
+			  if (rslt == BME280_OK)
+			  {
+				temperature = comp_data.temperature / 100.0f;
+				humidity = comp_data.humidity / 1024.0f;
+				pressure = comp_data.pressure / 10000.0f;
+			  }
+			  else
+			  {
+				sprintf(uart_buf, "BME280 read error (%d)\r\n", rslt);
+				HAL_UART_Transmit(&huart2, (uint8_t*)uart_buf, strlen(uart_buf), HAL_MAX_DELAY);
+			  }
+			  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3);
+			  osMutexRelease(I2C_MutexHandle);
+			  osSemaphoreRelease(Temperatura01Handle);
+	  }
+	  osDelay(100);
   }
   /* USER CODE END 5 */
 }
@@ -512,7 +534,33 @@ void StartEncoder(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(10);
+	  if(osSemaphoreAcquire(Temperatura01Handle, 10) == osOK){
+		  if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7) == 1 && time_wait_1 == 0){
+			  time_wait_1 = osKernelGetTickCount();
+		  }
+		  if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == 1 && time_wait_2 == 0){
+			  time_wait_2 = osKernelGetTickCount();
+		  }
+		  if(time_wait_1 != 0 && time_wait_2 != 0){
+			  if(time_wait_1 > time_wait_2){
+				  set_temp++;
+				  wait = time_wait_1 - time_wait_2;
+			  }
+			  else{
+				  if(set_temp > 0){
+					  set_temp--;
+				  }
+				  else{
+					  set_temp = 0;
+				  }
+				  wait = time_wait_2 - time_wait_1;
+			  }
+			  time_wait_1 = 0;
+			  time_wait_2 = 0;
+		  }
+		  osSemaphoreRelease(Temperatura01Handle);
+		  osDelay(10);
+	  }
   }
   /* USER CODE END StartEncoder */
 }
@@ -530,9 +578,49 @@ void StartOLED(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(10);
+	  if(osMutexAcquire(I2C_MutexHandle, osWaitForever) == osOK){
+		  sprintf(uart_buf, "Humidity: %.2f", humidity);
+		  ssd1306_SetCursor(1,0);
+		  ssd1306_WriteString(uart_buf, Font_7x10, White);
+		  sprintf(uart_buf, "Temperature: %.2f", temperature);
+		  ssd1306_SetCursor(1,10);
+		  ssd1306_WriteString(uart_buf, Font_7x10, White);
+		  ssd1306_UpdateScreen();
+		  sprintf(uart_buf, "Set Temp.: %d", set_temp);
+		  ssd1306_SetCursor(1,20);
+		  ssd1306_WriteString(uart_buf, Font_7x10, White);
+		  ssd1306_UpdateScreen();
+		  osMutexRelease(I2C_MutexHandle);
+	  }
+	  osDelay(100);
   }
   /* USER CODE END StartOLED */
+}
+
+/* USER CODE BEGIN Header_StartHeating01 */
+/**
+* @brief Function implementing the Heating thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartHeating01 */
+void StartHeating01(void *argument)
+{
+  /* USER CODE BEGIN StartHeating01 */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartHeating01 */
+}
+
+/* EncoderCallback01 function */
+void EncoderCallback01(void *argument)
+{
+  /* USER CODE BEGIN EncoderCallback01 */
+
+  /* USER CODE END EncoderCallback01 */
 }
 
 /**
