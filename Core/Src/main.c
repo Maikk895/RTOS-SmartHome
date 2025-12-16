@@ -29,6 +29,8 @@
 #include "ssd1306.h"
 #include "ssd1306_fonts.h"
 #include "ssd1306_conf.h"
+#include "pn532.h"
+#include "pn532_stm32f1.h"
 
 //https://github.com/eziya/STM32_HAL_BME280
 //https://github.com/afiskon/stm32-ssd1306
@@ -42,7 +44,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define DEBOUNCE_MS 50
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -83,10 +85,17 @@ const osThreadAttr_t Heating_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal4,
 };
-/* Definitions for Encoder_tim01 */
-osTimerId_t Encoder_tim01Handle;
-const osTimerAttr_t Encoder_tim01_attributes = {
-  .name = "Encoder_tim01"
+/* Definitions for RFID */
+osThreadId_t RFIDHandle;
+const osThreadAttr_t RFID_attributes = {
+  .name = "RFID",
+  .stack_size = 512 * 4,
+  .priority = (osPriority_t) osPriorityNormal7,
+};
+/* Definitions for Screen_tim01 */
+osTimerId_t Screen_tim01Handle;
+const osTimerAttr_t Screen_tim01_attributes = {
+  .name = "Screen_tim01"
 };
 /* Definitions for I2C_Mutex */
 osMutexId_t I2C_MutexHandle;
@@ -103,12 +112,16 @@ osSemaphoreId_t Temperatura01Handle;
 const osSemaphoreAttr_t Temperatura01_attributes = {
   .name = "Temperatura01"
 };
+/* Definitions for Rfid01 */
+osSemaphoreId_t Rfid01Handle;
+const osSemaphoreAttr_t Rfid01_attributes = {
+  .name = "Rfid01"
+};
 /* USER CODE BEGIN PV */
 volatile float temperature;
 volatile float humidity;
 volatile float pressure;
-uint16_t time_wait_1, time_wait_2, wait;
-uint8_t set_temp;
+uint8_t set_temp = 20;
 
 struct bme280_dev dev;
 struct bme280_data comp_data;
@@ -118,6 +131,23 @@ char hum_string[50];
 char temp_string[50];
 char press_string[50];
 char uart_buf[150];
+char RFID_buf[50];
+
+//RFID
+uint8_t buff[255];
+uint8_t uid[MIFARE_UID_MAX_LENGTH];
+int32_t uid_len = 0;
+char uart_buff[100];
+PN532 pn532; //struktura do obsługi RFID
+struct User;
+uint8_t usr_cnt = 0;
+char name[20];
+bool check_code = 1;
+char code2[20];
+
+uint32_t now;
+uint32_t last_press_up = 0;
+uint32_t last_press_down = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -129,7 +159,8 @@ void StartTemp(void *argument);
 void StartEncoder(void *argument);
 void StartOLED(void *argument);
 void StartHeating01(void *argument);
-void EncoderCallback01(void *argument);
+void StartRFID(void *argument);
+void ScreenCallback01(void *argument);
 
 /* USER CODE BEGIN PFP */
 int8_t user_i2c_read(uint8_t id, uint8_t reg_addr, uint8_t *data, uint16_t len);
@@ -162,6 +193,14 @@ void user_delay_ms(uint32_t period)
 {
   HAL_Delay(period);
 }
+
+struct User{
+	char name[20];
+	uint8_t code[4];
+};
+struct User users[2];
+struct User *ptr = users;
+
 /* USER CODE END 0 */
 
 /**
@@ -172,7 +211,17 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+	usr_cnt = sizeof(users)/sizeof(users[0]);
+	strcpy(ptr[0].name, "Lidia");
+	ptr[0].code[0] = 241;
+	ptr[0].code[1] = 69;
+	ptr[0].code[2] = 183;
+	ptr[0].code[3] = 1;
+	strcpy(ptr[1].name, "Kacper");
+	ptr[1].code[0] = 141;
+	ptr[1].code[1] = 168;
+	ptr[1].code[2] = 204;
+	ptr[1].code[3] = 1;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -196,10 +245,11 @@ int main(void)
   MX_USART2_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  //sprintf(uart_buf, "Starting BME280...\r\n");
-    //HAL_UART_Transmit(&huart2, (uint8_t*)uart_buf, strlen(uart_buf), HAL_MAX_DELAY);
 
-    /* BME280 initialization */
+
+    /*
+     *  BME280 initialization
+     */
     dev.dev_id = BME280_I2C_ADDR_PRIM;   // 0x76 or 0x77 depending on module
     dev.intf = BME280_I2C_INTF;
     dev.read = user_i2c_read;
@@ -221,15 +271,26 @@ int main(void)
     dev.settings.osr_t = BME280_OVERSAMPLING_2X;
     dev.settings.filter = BME280_FILTER_COEFF_16;
     dev.settings.standby_time = BME280_STANDBY_TIME_62_5_MS;
-
     rslt = bme280_set_sensor_settings(BME280_ALL_SETTINGS_SEL, &dev);
 
-    //OLED init
+    /*
+     * OLED init
+     */
     ssd1306_Init();
-    //ssd1306_SetCursor(1,0);
-    //ssd1306_WriteString("Witaj", Font_7x10, White);
-    //ssd1306_UpdateScreen();
 
+    /*
+     * RFID init
+     */
+	PN532_I2C_Init(&pn532);
+	PN532_GetFirmwareVersion(&pn532, buff);
+	if (PN532_GetFirmwareVersion(&pn532, buff) == PN532_STATUS_OK) { //wywalić
+
+		sprintf(uart_buff,"Found PN532 with firmware version: %d.%d\r\n", buff[1], buff[2]);
+		HAL_UART_Transmit(&huart2, (uint8_t*) uart_buff,sizeof(uart_buff) , 100);
+	} else {
+	  return -1;
+	}
+	PN532_SamConfiguration(&pn532);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -249,13 +310,16 @@ int main(void)
   /* creation of Temperatura01 */
   Temperatura01Handle = osSemaphoreNew(1, 1, &Temperatura01_attributes);
 
+  /* creation of Rfid01 */
+  Rfid01Handle = osSemaphoreNew(1, 1, &Rfid01_attributes);
+
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* Create the timer(s) */
-  /* creation of Encoder_tim01 */
-  Encoder_tim01Handle = osTimerNew(EncoderCallback01, osTimerPeriodic, NULL, &Encoder_tim01_attributes);
+  /* creation of Screen_tim01 */
+  Screen_tim01Handle = osTimerNew(ScreenCallback01, osTimerOnce, NULL, &Screen_tim01_attributes);
 
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
@@ -277,6 +341,9 @@ int main(void)
 
   /* creation of Heating */
   HeatingHandle = osThreadNew(StartHeating01, NULL, &Heating_attributes);
+
+  /* creation of RFID */
+  RFIDHandle = osThreadNew(StartRFID, NULL, &RFID_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -457,20 +524,20 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, LD3_Pin|Heating_on_Pin|Auth_pass_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : ENCODER1_Pin ENCODER2_Pin */
-  GPIO_InitStruct.Pin = ENCODER1_Pin|ENCODER2_Pin;
+  /*Configure GPIO pins : Temp_down_Pin Temp_up_Pin */
+  GPIO_InitStruct.Pin = Temp_down_Pin|Temp_up_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LD3_Pin */
-  GPIO_InitStruct.Pin = LD3_Pin;
+  /*Configure GPIO pins : LD3_Pin Heating_on_Pin Auth_pass_Pin */
+  GPIO_InitStruct.Pin = LD3_Pin|Heating_on_Pin|Auth_pass_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD3_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -498,7 +565,6 @@ void StartTemp(void *argument)
 		  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3);
 		  rslt = bme280_set_sensor_mode(BME280_FORCED_MODE, &dev);
 			  osDelay(40);
-			  //dev.delay_ms(40);
 
 			  rslt = bme280_get_sensor_data(BME280_ALL, &comp_data, &dev);
 			  if (rslt == BME280_OK)
@@ -534,33 +600,25 @@ void StartEncoder(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  if(osSemaphoreAcquire(Temperatura01Handle, 10) == osOK){
-		  if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7) == 1 && time_wait_1 == 0){
-			  time_wait_1 = osKernelGetTickCount();
-		  }
-		  if(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == 1 && time_wait_2 == 0){
-			  time_wait_2 = osKernelGetTickCount();
-		  }
-		  if(time_wait_1 != 0 && time_wait_2 != 0){
-			  if(time_wait_1 > time_wait_2){
-				  set_temp++;
-				  wait = time_wait_1 - time_wait_2;
-			  }
-			  else{
-				  if(set_temp > 0){
-					  set_temp--;
-				  }
-				  else{
-					  set_temp = 0;
-				  }
-				  wait = time_wait_2 - time_wait_1;
-			  }
-			  time_wait_1 = 0;
-			  time_wait_2 = 0;
-		  }
-		  osSemaphoreRelease(Temperatura01Handle);
-		  osDelay(10);
-	  }
+	  now = osKernelGetTickCount();
+	  if(HAL_GPIO_ReadPin(Temp_up_GPIO_Port, Temp_up_Pin) == GPIO_PIN_SET)
+	          {
+	              if(now - last_press_up > DEBOUNCE_MS)
+	              {
+	                  last_press_up = now;
+	                  set_temp++;
+	              }
+	          }
+      if(HAL_GPIO_ReadPin(Temp_down_GPIO_Port, Temp_down_Pin) == GPIO_PIN_SET)
+       {
+           if(now - last_press_down > DEBOUNCE_MS)
+           {
+               last_press_down = now;
+               if(set_temp > 0)
+            	   set_temp--;
+           }
+       }
+	  osDelay(10);
   }
   /* USER CODE END StartEncoder */
 }
@@ -585,10 +643,15 @@ void StartOLED(void *argument)
 		  sprintf(uart_buf, "Temperature: %.2f", temperature);
 		  ssd1306_SetCursor(1,10);
 		  ssd1306_WriteString(uart_buf, Font_7x10, White);
-		  ssd1306_UpdateScreen();
 		  sprintf(uart_buf, "Set Temp.: %d", set_temp);
 		  ssd1306_SetCursor(1,20);
 		  ssd1306_WriteString(uart_buf, Font_7x10, White);
+
+		  if(uid_len != PN532_STATUS_ERROR){
+			  ssd1306_SetCursor(1,35);
+			  ssd1306_WriteString(RFID_buf, Font_7x10, White);
+			  osTimerStart(Screen_tim01Handle, 3000);
+		  }
 		  ssd1306_UpdateScreen();
 		  osMutexRelease(I2C_MutexHandle);
 	  }
@@ -610,17 +673,72 @@ void StartHeating01(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+	  if(temperature < set_temp){
+		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, 1);
+	  }
+	  else{
+		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, 0);
+	  }
+    osDelay(5000);
   }
   /* USER CODE END StartHeating01 */
 }
 
-/* EncoderCallback01 function */
-void EncoderCallback01(void *argument)
+/* USER CODE BEGIN Header_StartRFID */
+/**
+* @brief Function implementing the RFID thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartRFID */
+void StartRFID(void *argument)
 {
-  /* USER CODE BEGIN EncoderCallback01 */
+  /* USER CODE BEGIN StartRFID */
+  /* Infinite loop */
+  for(;;)
+  {
+	  if(osMutexAcquire(I2C_MutexHandle, 100) == osOK && osSemaphoreAcquire(Rfid01Handle, 100)  == osOK){
+	  uid_len = PN532_ReadPassiveTarget(&pn532, uid, PN532_MIFARE_ISO14443A, 1000);
+		  if (uid_len != PN532_STATUS_ERROR) {
+			  for(uint8_t x =0; x < usr_cnt; x++){						//sprawdzenie dla każdego użytkownika
+				  check_code = 1;
 
-  /* USER CODE END EncoderCallback01 */
+				  for(uint8_t uid_num = 0; uid_num < 4; uid_num++){		//sprawdzenie 4 segmentów UID
+					  if(uid[uid_num] != (ptr+x)->code[uid_num]){
+						  check_code = 0;
+						  break;
+					  }
+				  }
+				  if(check_code == 1){									//Jeżeli wszystkie 4 kody się zgadzają to check_code = 1 i przypisuje odpowiednie imie
+					  strcpy(name,(ptr+x)->name);
+					  sprintf(RFID_buf, "Witaj %s", name);
+					  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, 1);			//Sygnalizacja poprawnej autoryzacji
+					  break;
+				  }
+			  }
+			  if(check_code == 0){
+				  sprintf(RFID_buf, "Brak dostepu");
+			  }
+		  }
+		  osSemaphoreRelease(Rfid01Handle);
+		  osMutexRelease(I2C_MutexHandle);
+	  }
+	  osDelay(1000);
+  }
+  /* USER CODE END StartRFID */
+}
+
+/* ScreenCallback01 function */
+void ScreenCallback01(void *argument)
+{
+  /* USER CODE BEGIN ScreenCallback01 */
+	if(osMutexAcquire(I2C_MutexHandle, 100) == osOK){
+		ssd1306_FillRectangle(1,35,127,45, Black);
+        ssd1306_UpdateScreen();
+        osMutexRelease(I2C_MutexHandle);
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, 0);
+	}
+  /* USER CODE END ScreenCallback01 */
 }
 
 /**
