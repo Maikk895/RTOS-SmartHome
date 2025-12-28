@@ -76,7 +76,7 @@ osThreadId_t OLED_DispHandle;
 const osThreadAttr_t OLED_Disp_attributes = {
   .name = "OLED_Disp",
   .stack_size = 512 * 4,
-  .priority = (osPriority_t) osPriorityNormal1,
+  .priority = (osPriority_t) osPriorityHigh,
 };
 /* Definitions for Heating */
 osThreadId_t HeatingHandle;
@@ -107,15 +107,25 @@ osSemaphoreId_t Alarm01Handle;
 const osSemaphoreAttr_t Alarm01_attributes = {
   .name = "Alarm01"
 };
-/* Definitions for Temperatura01 */
-osSemaphoreId_t Temperatura01Handle;
-const osSemaphoreAttr_t Temperatura01_attributes = {
-  .name = "Temperatura01"
+/* Definitions for OLED_Sem */
+osSemaphoreId_t OLED_SemHandle;
+const osSemaphoreAttr_t OLED_Sem_attributes = {
+  .name = "OLED_Sem"
 };
 /* Definitions for Rfid01 */
 osSemaphoreId_t Rfid01Handle;
 const osSemaphoreAttr_t Rfid01_attributes = {
   .name = "Rfid01"
+};
+/* Definitions for BTN_UP */
+osEventFlagsId_t BTN_UPHandle;
+const osEventFlagsAttr_t BTN_UP_attributes = {
+  .name = "BTN_UP"
+};
+/* Definitions for BTN_DWN */
+osEventFlagsId_t BTN_DWNHandle;
+const osEventFlagsAttr_t BTN_DWN_attributes = {
+  .name = "BTN_DWN"
 };
 /* USER CODE BEGIN PV */
 volatile float temperature;
@@ -307,8 +317,8 @@ int main(void)
   /* creation of Alarm01 */
   Alarm01Handle = osSemaphoreNew(1, 1, &Alarm01_attributes);
 
-  /* creation of Temperatura01 */
-  Temperatura01Handle = osSemaphoreNew(1, 1, &Temperatura01_attributes);
+  /* creation of OLED_Sem */
+  OLED_SemHandle = osSemaphoreNew(1, 1, &OLED_Sem_attributes);
 
   /* creation of Rfid01 */
   Rfid01Handle = osSemaphoreNew(1, 1, &Rfid01_attributes);
@@ -348,6 +358,12 @@ int main(void)
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   /* USER CODE END RTOS_THREADS */
+
+  /* creation of BTN_UP */
+  BTN_UPHandle = osEventFlagsNew(&BTN_UP_attributes);
+
+  /* creation of BTN_DWN */
+  BTN_DWNHandle = osEventFlagsNew(&BTN_DWN_attributes);
 
   /* USER CODE BEGIN RTOS_EVENTS */
   /* add events, ... */
@@ -561,7 +577,7 @@ void StartTemp(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  if(osMutexAcquire(I2C_MutexHandle, 10) == osOK && osSemaphoreAcquire(Temperatura01Handle, 10)  == osOK){
+	  if(osMutexAcquire(I2C_MutexHandle, 10) == osOK){
 		  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3);
 		  rslt = bme280_set_sensor_mode(BME280_FORCED_MODE, &dev);
 			  osDelay(40);
@@ -580,7 +596,7 @@ void StartTemp(void *argument)
 			  }
 			  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_3);
 			  osMutexRelease(I2C_MutexHandle);
-			  osSemaphoreRelease(Temperatura01Handle);
+			  osSemaphoreRelease(OLED_SemHandle);
 	  }
 	  osDelay(100);
   }
@@ -594,12 +610,16 @@ void StartTemp(void *argument)
 * @retval None
 */
 /* USER CODE END Header_StartEncoder */
-void StartEncoder(void *argument)
+void StartEncoder(void *argument)			//POPRAWIĆ
 {
   /* USER CODE BEGIN StartEncoder */
   /* Infinite loop */
   for(;;)
   {
+	  /*
+	  if(osEventFlagsWait(ef_id, flags, osFlagsWaitAny, 10)){
+
+	  }*/
 	  now = osKernelGetTickCount();
 	  if(HAL_GPIO_ReadPin(Temp_up_GPIO_Port, Temp_up_Pin) == GPIO_PIN_SET)
 	          {
@@ -636,7 +656,7 @@ void StartOLED(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  if(osMutexAcquire(I2C_MutexHandle, osWaitForever) == osOK){
+	  if(osMutexAcquire(I2C_MutexHandle, 10) == osOK && osSemaphoreAcquire(OLED_SemHandle, 10)){
 		  sprintf(uart_buf, "Humidity: %.2f", humidity);
 		  ssd1306_SetCursor(1,0);
 		  ssd1306_WriteString(uart_buf, Font_7x10, White);
@@ -650,12 +670,12 @@ void StartOLED(void *argument)
 		  if(uid_len != PN532_STATUS_ERROR){
 			  ssd1306_SetCursor(1,35);
 			  ssd1306_WriteString(RFID_buf, Font_7x10, White);
-			  osTimerStart(Screen_tim01Handle, 3000);
+			  //osTimerStart(Screen_tim01Handle, 3000);
 		  }
 		  ssd1306_UpdateScreen();
 		  osMutexRelease(I2C_MutexHandle);
 	  }
-	  osDelay(100);
+	  //osDelay(100);
   }
   /* USER CODE END StartOLED */
 }
@@ -697,7 +717,7 @@ void StartRFID(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  if(osMutexAcquire(I2C_MutexHandle, 100) == osOK && osSemaphoreAcquire(Rfid01Handle, 100)  == osOK){
+	  if(osMutexAcquire(I2C_MutexHandle, 100) == osOK){
 	  uid_len = PN532_ReadPassiveTarget(&pn532, uid, PN532_MIFARE_ISO14443A, 1000);
 		  if (uid_len != PN532_STATUS_ERROR) {
 			  for(uint8_t x =0; x < usr_cnt; x++){						//sprawdzenie dla każdego użytkownika
@@ -719,8 +739,8 @@ void StartRFID(void *argument)
 			  if(check_code == 0){
 				  sprintf(RFID_buf, "Brak dostepu");
 			  }
+			  osSemaphoreRelease(OLED_SemHandle);
 		  }
-		  osSemaphoreRelease(Rfid01Handle);
 		  osMutexRelease(I2C_MutexHandle);
 	  }
 	  osDelay(1000);

@@ -2,13 +2,13 @@
 CAD.formats=
 CAD.pinconfig=
 CAD.provider=
-FREERTOS.BinarySemaphores01=Alarm01,Dynamic,NULL,Available;Temperatura01,Dynamic,NULL,Available;Rfid01,Dynamic,NULL,Available
-FREERTOS.Events01=
+FREERTOS.BinarySemaphores01=Alarm01,Dynamic,NULL,Available;OLED_Sem,Dynamic,NULL,Available;Rfid01,Dynamic,NULL,Available
+FREERTOS.Events01=BTN_UP,Dynamic,NULL;BTN_DWN,Dynamic,NULL
 FREERTOS.FootprintOK=true
 FREERTOS.HEAP_NUMBER=4
 FREERTOS.IPParameters=Tasks01,BinarySemaphores01,FootprintOK,Mutexes01,configTOTAL_HEAP_SIZE,configUSE_NEWLIB_REENTRANT,HEAP_NUMBER,Timers01,Events01
 FREERTOS.Mutexes01=I2C_Mutex,Dynamic,NULL,Available
-FREERTOS.Tasks01=Temp_Read,24,512,StartTemp,Default,NULL,Dynamic,NULL,NULL;Encoder,26,128,StartEncoder,Default,NULL,Dynamic,NULL,NULL;OLED_Disp,25,512,StartOLED,Default,NULL,Dynamic,NULL,NULL;Heating,28,128,StartHeating01,Default,NULL,Dynamic,NULL,NULL;RFID,31,512,StartRFID,Default,NULL,Dynamic,NULL,NULL
+FREERTOS.Tasks01=Temp_Read,24,512,StartTemp,Default,NULL,Dynamic,NULL,NULL;Encoder,26,128,StartEncoder,Default,NULL,Dynamic,NULL,NULL;OLED_Disp,40,512,StartOLED,Default,NULL,Dynamic,NULL,NULL;Heating,28,128,StartHeating01,Default,NULL,Dynamic,NULL,NULL;RFID,31,512,StartRFID,Default,NULL,Dynamic,NULL,NULL
 FREERTOS.Timers01=Screen_tim01,ScreenCallback01,osTimerOnce,Default,NULL,Dynamic,NULL
 FREERTOS.configTOTAL_HEAP_SIZE=10000
 FREERTOS.configUSE_NEWLIB_REENTRANT=1
