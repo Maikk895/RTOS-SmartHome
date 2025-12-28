@@ -30,6 +30,7 @@
 #include "stm32l4xx_hal.h"
 #include "main.h"
 #include "pn532_stm32f1.h"
+#include <stdio.h>
 
 #define _SPI_STATREAD                   0x02
 #define _SPI_DATAWRITE                  0x01

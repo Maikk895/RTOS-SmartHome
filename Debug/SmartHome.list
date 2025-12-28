@@ -27,25 +27,25 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   ALLOC
  11 .ARM.attributes 00000030  00000000  00000000  000111e0  2**0
                   CONTENTS, READONLY
- 12 .debug_info   00024b46  00000000  00000000  00011210  2**0
+ 12 .debug_info   00024b4b  00000000  00000000  00011210  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 13 .debug_abbrev 00004ed7  00000000  00000000  00035d56  2**0
+ 13 .debug_abbrev 00004edb  00000000  00000000  00035d5b  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 14 .debug_aranges 00001ec8  00000000  00000000  0003ac30  2**3
+ 14 .debug_aranges 00001ec8  00000000  00000000  0003ac38  2**3
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 15 .debug_rnglists 000017e3  00000000  00000000  0003caf8  2**0
+ 15 .debug_rnglists 000017e3  00000000  00000000  0003cb00  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 16 .debug_macro  0000774b  00000000  00000000  0003e2db  2**0
+ 16 .debug_macro  00007823  00000000  00000000  0003e2e3  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 17 .debug_line   00023a49  00000000  00000000  00045a26  2**0
+ 17 .debug_line   00023b8e  00000000  00000000  00045b06  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 18 .debug_str    000dc949  00000000  00000000  0006946f  2**0
+ 18 .debug_str    000dc949  00000000  00000000  00069694  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 19 .comment      00000043  00000000  00000000  00145db8  2**0
+ 19 .comment      00000043  00000000  00000000  00145fdd  2**0
                   CONTENTS, READONLY
- 20 .debug_frame  000093fc  00000000  00000000  00145dfc  2**2
+ 20 .debug_frame  000093fc  00000000  00000000  00146020  2**2
                   CONTENTS, READONLY, DEBUGGING, OCTETS
- 21 .debug_line_str 00000063  00000000  00000000  0014f1f8  2**0
+ 21 .debug_line_str 00000063  00000000  00000000  0014f41c  2**0
                   CONTENTS, READONLY, DEBUGGING, OCTETS
 
 Disassembly of section .text:
@@ -5474,7 +5474,7 @@ void StartTemp(void *argument)
 * @retval None
 */
 /* USER CODE END Header_StartEncoder */
-void StartEncoder(void *argument)
+void StartEncoder(void *argument)			//POPRAWIĆ
 {
  8002cd8:	b580      	push	{r7, lr}
  8002cda:	b082      	sub	sp, #8
@@ -5787,7 +5787,7 @@ void StartRFID(void *argument)
  8002ef6:	4b35      	ldr	r3, [pc, #212]	@ (8002fcc <StartRFID+0x104>)
  8002ef8:	681b      	ldr	r3, [r3, #0]
  8002efa:	f1b3 3fff 	cmp.w	r3, #4294967295
- 8002efe:	d050      	beq.n	8002fa2 <StartRFID+0xda>
+ 8002efe:	d055      	beq.n	8002fac <StartRFID+0xe4>
 			  for(uint8_t x =0; x < usr_cnt; x++){						//sprawdzenie dla każdego użytkownika
  8002f00:	2300      	movs	r3, #0
  8002f02:	73fb      	strb	r3, [r7, #15]
@@ -5885,12 +5885,12 @@ void StartRFID(void *argument)
  8002f9c:	4810      	ldr	r0, [pc, #64]	@ (8002fe0 <StartRFID+0x118>)
  8002f9e:	f009 fe15 	bl	800cbcc <siprintf>
 			  }
-		  }
-		  osSemaphoreRelease(OLED_SemHandle);
+			  osSemaphoreRelease(OLED_SemHandle);
  8002fa2:	4b13      	ldr	r3, [pc, #76]	@ (8002ff0 <StartRFID+0x128>)
  8002fa4:	681b      	ldr	r3, [r3, #0]
  8002fa6:	4618      	mov	r0, r3
  8002fa8:	f005 fdce 	bl	8008b48 <osSemaphoreRelease>
+		  }
 		  osMutexRelease(I2C_MutexHandle);
  8002fac:	4b04      	ldr	r3, [pc, #16]	@ (8002fc0 <StartRFID+0xf8>)
  8002fae:	681b      	ldr	r3, [r3, #0]
