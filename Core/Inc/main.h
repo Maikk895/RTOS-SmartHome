@@ -63,6 +63,7 @@ void Error_Handler(void);
 #define VCP_TX_GPIO_Port GPIOA
 #define Temp_down_Pin GPIO_PIN_0
 #define Temp_down_GPIO_Port GPIOB
+#define Temp_down_EXTI_IRQn EXTI0_IRQn
 #define SWDIO_Pin GPIO_PIN_13
 #define SWDIO_GPIO_Port GPIOA
 #define SWCLK_Pin GPIO_PIN_14
@@ -77,6 +78,7 @@ void Error_Handler(void);
 #define Auth_pass_GPIO_Port GPIOB
 #define Temp_up_Pin GPIO_PIN_7
 #define Temp_up_GPIO_Port GPIOB
+#define Temp_up_EXTI_IRQn EXTI9_5_IRQn
 
 /* USER CODE BEGIN Private defines */
 
